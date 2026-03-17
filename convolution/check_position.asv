@@ -1,0 +1,127 @@
+in_points = [];
+result = [];
+
+for x = 0:0.01:0.6
+    for y = 0:0.01:0.6
+        a = 0;
+        keeprun = 0;
+        position = 1;
+        target = [x y];
+        K = 9;
+        t_1 = [0.5, 0.4808];%[d,r]
+        t_2 = [0.5, 0.2404];
+        t_3 = [0.375, 0.0962];
+        t_4 = [0.1826, 0.074];
+        t_5 = [0.0625, 0.0601];
+        t_6 = [0.125, 0.1202];
+        t_7 = [0.25, 0.2404];
+        while a == 0
+
+            switch position
+                case 1
+                    d_A = t_1; d_B = t_2; d_C = t_7;
+                case 2
+                    d_A = t_3; d_B = t_2; d_C = t_7;
+                case 3
+                    d_A = t_3; d_B = t_4; d_C = t_7;
+                case 4
+                    d_A = t_4; d_B = t_6;d_C = t_7;
+                case 5
+                    d_A = t_6; d_B = t_5; d_C = t_4;
+            end
+            posi_re = isPointInTriangle(target, d_A, d_B, d_C);
+            if posi_re == 0 & position > 5
+                disp('안에 없음');
+                a = 0;
+                keeprun = 0;
+                break;
+
+            elseif posi_re == 1
+                a = 1;
+                keeprun = 1;
+                break;
+            elseif posi_re == 0 && position <= 5
+                a = 0;
+                position = position + 1;
+                keeprun = 0;
+            end
+        end
+
+        if keeprun == 1
+            %%%%%%%%%좌표 안의 값 구하기%%%%%%%%%
+            in_points = [in_points; x, y];
+            k1 = 200; k2 = 200; k3 = 200;
+            n1 = k1/d_A(1,2); n2 = k2/d_B(1,2); n3 = k3/d_C(1,2);
+            [m1, m2, m3, exitflag, fval] = solve_m123_fmincon(x, y, d_A, d_B, d_C);
+
+            [graph1, graph2, graph3] = loadGraphsFromTriangle(d_A, d_B, d_C);
+            
+            % 그래프 데이터를 분리
+            x1 = graph1(:,1); y1 = graph1(:,2);
+            x2 = graph2(:,1); y2 = graph2(:,2);
+            x3 = graph3(:,1); y3 = graph3(:,2);
+
+            if exitflag > 0
+                fprintf('x=%.2f, y=%.2f → m1=%.4f, m2=%.4f, m3=%.4f\n', x, y, m1, m2, m3);
+                delta1 = 10 * log10(1 / d_A(1,2));
+                delta2 = 10 * log10(1 / d_B(1,2));
+                delta3 = 10 * log10(1 / d_C(1,2));
+                graph1(:,1) = graph1(:,1) - delta1;
+                graph2(:,1) = graph2(:,1) - delta2;
+                graph3(:,1) = graph3(:,1) - delta3;
+
+                R = (k1*m1 + k2*m2 + k3*m3)/(n1*m1 + n2*m2 + n3*m3);
+                delta = 10 * log10(1/R);
+
+                BER = [];
+                
+                for x_range = (7-delta): 1 : (16-delta)
+
+                    y1_val = interp1(graph1(:,1), y1, x_range, 'linear', 'extrap');
+                    y2_val = interp1(graph2(:,1), y2, x_range, 'linear', 'extrap');
+                    y3_val = interp1(graph3(:,1), y3, x_range, 'linear', 'extrap');
+
+                    ber_val = (k1*m1*y1_val + k2*m2*y2_val + k3*m3*y3_val)/(k1*m1 + k2*m2 + k3*m3);
+                    
+                    BER(end + 1, 2) = ber_val;
+                    BER(end, 1) = x_range;
+                end
+                
+                target_y = 1e-3;
+                BER(:,1) = BER(:,1) + delta;
+
+                z = interp1(BER(:,1), BER(:,2), target_y, 'linear', 'extrap');
+                result(end+1, :) = [x, y, z];
+
+            else
+                error('최적화 실패: x=%.2f, y=%.2f에서 수렴하지 않았습니다 (exitflag=%d)', x, y, exitflag);
+            end
+        
+
+
+        elseif keeprun == 0
+            %%%%%%%%%삼각형 밖의 점 --> 다음 점으로 이동%%%%%%%%%
+            continue;
+        end
+    end
+end
+
+
+% ===== 결과 시각화 =====
+%--- 3D 점 그래프 (xyz_points는 [x, y, z] 좌표) ---
+figure;
+scatter3(result(:,1), result(:,2), result(:,3), 40, result(:,3), 'filled');
+xlabel('Dimming'); ylabel('Code Ratio'); zlabel('SNR (x @ BER = 10^{-3})');
+title('3D plot: SNR vs dimming/code ratio');
+colorbar;
+grid on;
+hold on;
+
+%--- 다각형 윤곽선 정의 (z=0 평면) ---
+poly_x = [t_1(1) t_2(1) t_3(1) t_4(1) t_5(1) t_6(1) t_7(1) t_1(1)];
+poly_y = [t_1(2) t_2(2) t_3(2) t_4(2) t_5(2) t_6(2) t_7(2) t_1(2)];
+poly_z = zeros(size(poly_x)); % z = 0으로 고정
+
+%--- 3D 윤곽선 그리기 ---
+plot3(poly_x, poly_y, poly_z, 'r-', 'LineWidth', 2);
+legend('SNR Points', 'Polygon Boundary')
